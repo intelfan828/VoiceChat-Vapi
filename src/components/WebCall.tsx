@@ -10,6 +10,7 @@ class DailyFrameManager {
   private static instance: DailyFrameManager;
   private frame: any = null;
   private isInitializing: boolean = false;
+  private initializationPromise: Promise<any> | null = null;
 
   private constructor() {}
 
@@ -32,43 +33,53 @@ class DailyFrameManager {
   }
 
   async createFrame(container: HTMLElement, callUrl: string) {
+    // If there's an ongoing initialization, wait for it to complete
+    if (this.initializationPromise) {
+      return this.initializationPromise;
+    }
+
     if (this.isInitializing) {
       throw new Error('Frame initialization already in progress');
     }
 
-    try {
-      this.isInitializing = true;
-      
-      // Clean up existing frame
-      await this.destroyFrame();
-
-      // Request camera permissions first
+    this.initializationPromise = (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        stream.getTracks().forEach(track => track.stop()); // Stop the stream after getting permission
-      } catch (err) {
-        throw new Error('Camera access denied. Please allow camera access to join the call.');
+        this.isInitializing = true;
+        
+        // Clean up existing frame
+        await this.destroyFrame();
+
+        // Request camera permissions first
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          stream.getTracks().forEach(track => track.stop()); // Stop the stream after getting permission
+        } catch (err) {
+          throw new Error('Camera access denied. Please allow camera access to join the call.');
+        }
+
+        // Create new frame
+        this.frame = DailyIframe.createFrame(container, {
+          iframeStyle: {
+            width: '100%',
+            height: '100%',
+            border: '0',
+            borderRadius: '12px',
+          },
+          showLeaveButton: true,
+          showLocalVideo: true,
+        });
+
+        // Join the call
+        await this.frame.join({ url: callUrl });
+        
+        return this.frame;
+      } finally {
+        this.isInitializing = false;
+        this.initializationPromise = null;
       }
+    })();
 
-      // Create new frame
-      this.frame = DailyIframe.createFrame(container, {
-        iframeStyle: {
-          width: '100%',
-          height: '100%',
-          border: '0',
-          borderRadius: '12px',
-        },
-        showLeaveButton: true,
-        showLocalVideo: true,
-      });
-
-      // Join the call
-      await this.frame.join({ url: callUrl });
-      
-      return this.frame;
-    } finally {
-      this.isInitializing = false;
-    }
+    return this.initializationPromise;
   }
 
   getFrame() {
